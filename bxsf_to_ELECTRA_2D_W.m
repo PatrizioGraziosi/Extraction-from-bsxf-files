@@ -13,7 +13,7 @@
 %                                                                         %
 % ----------------------------------------------------------------------- %
 
-function bxsf_to_ELECTRA(fileName,material_name,alat,reduce_flag,interpolation_factor) %codegen
+function bxsf_to_ELECTRA_2D_W(fileName,material_name,alat,reduce_flag,interpolation_factor) %codegen
 if strcmp(reduce_flag,'y')
     reduce_SOC = 'SOC_not_magn';
 else
@@ -33,65 +33,79 @@ end
 % extraction codes run
 
 % this sub-function takes the data from the bxsf file and compose a 4D matrix
-[points_in_axis_kx, points_in_axis_ky , points_in_axis_kz, num_of_bands,...
-BandMatrix, Fermi, a, b, c] = Taking_data_from_bxsf(fileName);
+[points_in_axis_kx, points_in_axis_ky , num_of_bands,...
+BandMatrix, Fermi, a, b, extra_point_flag, points_in_axis_kz ] ...
+= Taking_data_from_bxsf(fileName);
 
 % now we compose the matrixes of the coordinates in k-space
 
-Ek = zeros(points_in_axis_kx,points_in_axis_ky,points_in_axis_kz,num_of_bands);
+Ek = zeros(points_in_axis_kx,points_in_axis_ky,num_of_bands);
+
+if strcmp(extra_point_flag,'no')
+
+for id_band = 1:num_of_bands %#ok<*FXUP>
+    id_k=1;
+    for id_x=1:points_in_axis_kx
+        for id_y=1:points_in_axis_ky
+                Ek(id_x,id_y,id_band) = BandMatrix(id_k,id_band)-Fermi;                
+                id_k=id_k+1;
+        end
+    end
+end
+
+elseif strcmp(extra_point_flag,'yes')
+
+Ek_temp = zeros(points_in_axis_kx,points_in_axis_ky,points_in_axis_kz);
 for id_band = 1:num_of_bands %#ok<*FXUP>
     id_k=1;
     for id_x=1:points_in_axis_kx
         for id_y=1:points_in_axis_ky
             for id_z=1:points_in_axis_kz
-                Ek(id_x,id_y,id_z,id_band) = BandMatrix(id_k,id_band)-Fermi;                
+                Ek_temp(id_x,id_y,id_z) = BandMatrix(id_k,id_band)-Fermi;                
                 id_k=id_k+1;
             end
         end
     end
+    Ek(:,:,id_band) = Ek_temp(:,:,1);
+end
+
 end
 
 % alat shall be inputted      
     blat = alat;
-    clat = alat;
 
+B_matrix = [ a*2*pi/(alat*1e-9) ; b*2*pi/(blat*1e-9) ] ;
 
-B_matrix = [ a*2*pi/(alat*1e-9) ; b*2*pi/(blat*1e-9); c*2*pi/(clat*1e-9) ] ;
-
-kx_matrix = zeros(points_in_axis_kx, points_in_axis_ky, points_in_axis_kz);
-ky_matrix = kx_matrix; kz_matrix = kx_matrix;
+kx_matrix = zeros(points_in_axis_kx, points_in_axis_ky);
+ky_matrix = kx_matrix; 
     for id_x = (points_in_axis_kx - 1) : -1 : 0
         for id_y = (points_in_axis_ky - 1) : -1 : 0 % 0 : points_in_axis_ky - 1
-            for id_z = (points_in_axis_kz - 1) : -1 : 0
                 
-                k_vector_not_norm = [id_x id_y id_z]*B_matrix; 
+                k_vector_not_norm = [id_x id_y ]*B_matrix; 
                 
-                kx_matrix(id_x+1,id_y+1,id_z+1) = 1/points_in_axis_kx * k_vector_not_norm(1);
-                ky_matrix(id_x+1,id_y+1,id_z+1) = 1/points_in_axis_ky * k_vector_not_norm(2);
-                kz_matrix(id_x+1,id_y+1,id_z+1) = 1/points_in_axis_kz * k_vector_not_norm(3);
-            end
+                kx_matrix(id_x+1,id_y+1) = 1/points_in_axis_kx * k_vector_not_norm(1);
+                ky_matrix(id_x+1,id_y+1) = 1/points_in_axis_ky * k_vector_not_norm(2);
+                
         end
     end
     
-% clearvars -except Ek kx_matrix ky_matrix kz_matrix a b c kx_array ky_array kz_array bands_interpolation bands_centering nk_new material_name alat
-
 
 % additional features
 if strcmp(reduce_SOC,'SOC_not_magn')
     Ek_full = Ek;
-    Ek=zeros(points_in_axis_kx,points_in_axis_ky,points_in_axis_kz,num_of_bands/2);
+    Ek=zeros(points_in_axis_kx,points_in_axis_ky,num_of_bands/2);
     for i = 1:num_of_bands/2
-        Ek(:,:,:,i) = Ek_full(:,:,:,2*i-1);
+        Ek(:,:,i) = Ek_full(:,:,2*i-1);
     end    
 end
-
 if strcmp(bands_interpolation,'yes')
-    [ Ek, kx_matrix, ky_matrix, kz_matrix ] = Interpolation_3D(Ek,kx_matrix,ky_matrix,kz_matrix,a,b,c,alat,interpolation_factor) ;
+    [ Ek, kx_matrix, ky_matrix ] = Interpolation_2D(Ek,kx_matrix,ky_matrix,a,b,alat,interpolation_factor) ;
 end
 
-
-save_filename=['Ek_',material_name,'.mat'];
-save(save_filename, 'Ek', 'kx_matrix', 'ky_matrix', 'kz_matrix', 'a', 'b', 'c', 'alat', 'save_filename') 
+save_filename_data=['Ek_',material_name,'.mat'];
+% save_filename = fullfile('..\Data\',save_filename_data);
+save_filename = fullfile('Data\',save_filename_data);
+save(save_filename, 'Ek', 'kx_matrix', 'ky_matrix', 'a', 'b', 'alat', 'save_filename')  
 
 
 % ------------------------------------------------------------------------
@@ -99,8 +113,9 @@ save(save_filename, 'Ek', 'kx_matrix', 'ky_matrix', 'kz_matrix', 'a', 'b', 'c', 
 % ------------------------------------------------------------------------
 % ------------------------------------------------------------------------
 
-function [points_in_axis_kx, points_in_axis_ky , points_in_axis_kz, num_of_bands,...
-BandMatrix, Fermi, a, b, c] = Taking_data_from_bxsf(fileName)
+function [points_in_axis_kx, points_in_axis_ky , num_of_bands,...
+BandMatrix, Fermi, a, b, extra_point_flag, points_in_axis_kz]...
+= Taking_data_from_bxsf(fileName)
 
 inputFile = strcat(fileName);
 fid = fopen(inputFile);
@@ -132,8 +147,15 @@ temp = fgetl(fid);
 points_array = str2num(temp) ; 
 points_in_axis_kx = points_array(1);
 points_in_axis_ky = points_array(2);
-points_in_axis_kz = points_array(3);
-num_of_points = points_in_axis_kx * points_in_axis_ky * points_in_axis_kz  ; 
+if max(size(points_array)) == 3
+    points_in_axis_kz = points_array(3);
+    num_of_points = points_in_axis_kx * points_in_axis_ky * points_in_axis_kz;
+    extra_point_flag = 'yes';
+else
+    num_of_points = points_in_axis_kx * points_in_axis_ky ;
+    extra_point_flag = 'no';
+    points_in_axis_kz = 1;
+end
 
 
 % the a, b, c vectors that ate in from 3 to 1 lines above the number of
@@ -191,21 +213,16 @@ end
 
 end
 
-
-
-
-
-    function [ Ek_i, kx_matrix_i, ky_matrix_i, kz_matrix_i ] = ...
-            Interpolation_3D(Ek,kx_matrix,ky_matrix,kz_matrix,a,b,c,alat,interpolation_factor)
+    function [ Ek_i, kx_matrix_i, ky_matrix_i ] = ...
+            Interpolation_2D(Ek,kx_matrix,ky_matrix,a,b,alat,interpolation_factor)
         nkx = size(Ek,1);
         nky = size(Ek,2);
-        nkz = size(Ek,3);
-        n_bands = size(Ek,4);
+        n_bands = size(Ek,3);
 
         if isempty(gcp('nocreate')) == 0
             delete(gcp('nocreate'))
         end
-        
+
         nlc = feature('NumCores') ;
         if nlc > n_bands
             nlc = n_bands;
@@ -216,12 +233,9 @@ end
             nl = nlc-1;
         end
         ppp = parpool('local',nlc);
-
+                
         if exist('blat','var') == 0 
             blat = alat;
-        end
-        if exist('clat','var') == 0 
-            clat = alat;
         end
         if exist('nk_new_x','var') == 0 
             nk_new_x = floor( nkx*interpolation_factor ) + 1;
@@ -229,47 +243,40 @@ end
         if exist('nk_new_y','var') == 0 
             nk_new_y = floor( nky*interpolation_factor ) + 1;
         end
-        if exist('nk_new_z','var') == 0 
-            nk_new_z = floor( nkz*interpolation_factor ) + 1;
-        end
-        B_matrix = [ a*2*pi/(alat*1e-9) ; b*2*pi/(blat*1e-9); c*2*pi/(clat*1e-9) ] ;
-        for id_z=nk_new_z-1:-1:0
-                for id_y=0:nk_new_y-1
-                    for id_x=0:nk_new_x-1
+        B_matrix = [ a*2*pi/(alat*1e-9) ; b*2*pi/(blat*1e-9) ] ;
+        for id_y=0:nk_new_y-1
+            for id_x=0:nk_new_x-1
 
-                        k_vector_not_norm = [id_x id_y id_z]*B_matrix; 
+                k_vector_not_norm = [id_x id_y ]*B_matrix; 
 
-                        Kx_interp(id_x+1,id_y+1,id_z+1) = 1/nk_new_x * k_vector_not_norm(1);
-                        Ky_interp(id_x+1,id_y+1,id_z+1) = 1/nk_new_y * k_vector_not_norm(2);
-                        Kz_interp(id_x+1,id_y+1,id_z+1) = 1/nk_new_z * k_vector_not_norm(3);
+                Kx_interp(id_x+1,id_y+1) = 1/nk_new_x * k_vector_not_norm(1);
+                Ky_interp(id_x+1,id_y+1) = 1/nk_new_y * k_vector_not_norm(2);
 
-                    end
-                end
+            end
         end
         
-        Ek_m=ones(nk_new_x,nk_new_y,nk_new_z,n_bands);
+        Ek_m=ones(nk_new_x,nk_new_y,n_bands);
         
         parfor i = 1:n_bands
 
-            Ek_temp = Ek(:,:,:,i);
-            Ek_m_temp = griddata(kx_matrix,ky_matrix,kz_matrix,Ek_temp,Kx_interp,Ky_interp,Kz_interp,'nearest');
+            Ek_temp = Ek(:,:,i);
+            Ek_m_temp = griddata(kx_matrix,ky_matrix,Ek_temp,Kx_interp,Ky_interp,'nearest');
 
             n = isnan(Ek_m_temp);
             n_pos = find(n);
 
             kx_n = Kx_interp(n_pos)';
             ky_n = Ky_interp(n_pos)';
-            kz_n = Kz_interp(n_pos)';
 
-            % ptCloud = pointCloud( [Kx_interp(:),Ky_interp(:),Kz_interp(:) ] ) ;
+            % ptCloud = pointCloud( [Kx_interp(:),Ky_interp(:), 0*Ky_interp(:)] ) ;
 
             for i_p = 1:size(kx_n,2)
-
-                % [indexes,~] = findNearestNeighborKz_interpKz_interps(ptCloud,[kx_n(i_p),ky_n(i_p),kz_n(i_p)],12) ;
 
                 dist_array = sqrt( (Kx_interp-kx_n(i_p)).^2 + (Ky_interp-ky_n(i_p)).^2 + (Kz_interp-kz_n(i_p)).^2 );
 
                 [~,indexes] = mink(dist_array,20) ;
+                
+                % [indexes,~] = findNearestNeighbors(ptCloud,[kx_n(i_p),ky_n(i_p),0],6) ;
 
                 nn = abs( isnan(Ek_m_temp(indexes)) -1) ;
                 nn_pos = nn;
@@ -280,16 +287,16 @@ end
 
             end
 
-            Ek_m(:,:,:,i) = Ek_m_temp;
+            Ek_m(:,:,i) = Ek_m_temp;
         end
-
+        
         delete(gcp('nocreate'))
 
         Ek_i = Ek_m;
-        kx_matrix_i=Kx_interp; ky_matrix_i=Ky_interp; kz_matrix_i=Kz_interp;
-
+        kx_matrix_i=Kx_interp; ky_matrix_i=Ky_interp;
 
     end
-% ------------------------------------------------------------------------
-% ------------------------------------------------------------------------
+
+
+
 end

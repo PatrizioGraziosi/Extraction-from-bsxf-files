@@ -34,11 +34,15 @@ end
 
 % this sub-function takes the data from the bxsf file and compose a 4D matrix
 [points_in_axis_kx, points_in_axis_ky , num_of_bands,...
-BandMatrix, Fermi, a, b ] = Taking_data_from_bxsf(fileName);
+BandMatrix, Fermi, a, b, extra_point_flag, points_in_axis_kz ]...
+= Taking_data_from_bxsf(fileName);
 
 % now we compose the matrixes of the coordinates in k-space
 
 Ek = zeros(points_in_axis_kx,points_in_axis_ky,num_of_bands);
+
+if strcmp(extra_point_flag,'no')
+
 for id_band = 1:num_of_bands %#ok<*FXUP>
     id_k=1;
     for id_x=1:points_in_axis_kx
@@ -47,6 +51,24 @@ for id_band = 1:num_of_bands %#ok<*FXUP>
                 id_k=id_k+1;
         end
     end
+end
+
+elseif strcmp(extra_point_flag,'yes')
+
+Ek_temp = zeros(points_in_axis_kx,points_in_axis_ky,points_in_axis_kz);
+for id_band = 1:num_of_bands %#ok<*FXUP>
+    id_k=1;
+    for id_x=1:points_in_axis_kx
+        for id_y=1:points_in_axis_ky
+            for id_z=1:points_in_axis_kz
+                Ek_temp(id_x,id_y,id_z) = BandMatrix(id_k,id_band)-Fermi;                
+                id_k=id_k+1;
+            end
+        end
+    end
+    Ek(:,:,id_band) = Ek_temp(:,:,1);
+end
+
 end
 
 % alat shall be inputted      
@@ -90,7 +112,8 @@ save(save_filename, 'Ek', 'kx_matrix', 'ky_matrix', 'a', 'b', 'alat', 'save_file
 % ------------------------------------------------------------------------
 
 function [points_in_axis_kx, points_in_axis_ky , num_of_bands,...
-BandMatrix, Fermi, a, b] = Taking_data_from_bxsf(fileName)
+BandMatrix, Fermi, a, b, extra_point_flag, points_in_axis_kz] ...
+= Taking_data_from_bxsf(fileName)
 
 inputFile = strcat(fileName);
 fid = fopen(inputFile);
@@ -98,12 +121,12 @@ fid = fopen(inputFile);
 for i = 1:60
     temp = fgetl(fid);
     k = strfind(temp,'Fermi Energy');
-    if k > 1
+    if k >= 1
         numstr = regexp(temp,'(-)?\d+(\.\d+)?(e(-|+)\d+)?','match') ;
         Fermi = str2double(numstr) ; 
     end
     k = strfind(temp,'BEGIN_BLOCK_BANDGRID');
-    if k > 1
+    if k >= 1
         num_lines_to_skip = i+9;
         break % i is kept
     end
@@ -122,7 +145,15 @@ temp = fgetl(fid);
 points_array = str2num(temp) ; 
 points_in_axis_kx = points_array(1);
 points_in_axis_ky = points_array(2);
-num_of_points = points_in_axis_kx * points_in_axis_ky ; 
+if max(size(points_array)) == 3
+    points_in_axis_kz = points_array(3);
+    num_of_points = points_in_axis_kx * points_in_axis_ky * points_in_axis_kz;
+    extra_point_flag = 'yes';
+else
+    num_of_points = points_in_axis_kx * points_in_axis_ky ;
+    extra_point_flag = 'no';
+    points_in_axis_kz = 1;
+end
 
 
 % the a, b, c vectors that ate in from 3 to 1 lines above the number of
@@ -133,8 +164,8 @@ temp = fgetl(fid);
 a = str2num(temp); %#ok<*NASGU>
 temp = fgetl(fid); 
 b = str2num(temp); 
-% temp = fgetl(fid); 
-% c = str2num(temp); 
+temp = fgetl(fid); 
+c = str2num(temp); 
 
 
 fgetl(fid); % thus we arrive to the num_line_to_skip, extraction starts
@@ -166,7 +197,7 @@ for id_band = 1:num_of_bands
         
         temp = fgetl(fid);
         
-        Band_temp = [Band_temp str2double(temp)]; %#ok<*AGROW>
+        Band_temp = [Band_temp str2num(temp)]; %#ok<*AGROW>
 
     end
     BandMatrix(:,id_band) = (Band_temp(:)); %#ok<*ST2NM>
@@ -185,6 +216,21 @@ end
         nkx = size(Ek,1);
         nky = size(Ek,2);
         n_bands = size(Ek,3);
+
+        if isempty(gcp('nocreate')) == 0
+            delete(gcp('nocreate'))
+        end
+
+        nlc = feature('NumCores') ;
+        if nlc > n_bands
+            nlc = n_bands;
+        end
+        if nlc > 3
+            nlc = nlc-2; % to keep the computer alive
+        elseif nlc > 1
+            nl = nlc-1;
+        end
+        ppp = parpool('local',nlc);
         
         if exist('blat','var') == 0 
             blat = alat;
@@ -209,10 +255,10 @@ end
         
         Ek_m=ones(nk_new_x,nk_new_y,n_bands);
         
-        for i = 1:n_bands
+        parfor i = 1:n_bands
 
-            Ek_temp = Ek(:,:,:,i);
-            Ek_m_temp = griddata(kx_matrix,ky_matrix,Ek_temp,Kx_interp,Ky_interp,'natural');
+            Ek_temp = Ek(:,:,i);
+            Ek_m_temp = griddata(kx_matrix,ky_matrix,Ek_temp,Kx_interp,Ky_interp,'nearest');
 
             n = isnan(Ek_m_temp);
             n_pos = find(n);
@@ -220,11 +266,15 @@ end
             kx_n = Kx_interp(n_pos)';
             ky_n = Ky_interp(n_pos)';
 
-            ptCloud = pointCloud( [Kx_interp(:),Ky_interp(:) ] ) ;
+            % ptCloud = pointCloud( [Kx_interp(:),Ky_interp(:), 0*Ky_interp(:)] ) ;
 
             for i_p = 1:size(kx_n,2)
 
-                [indexes,dists] = findNearestNeighbors(ptCloud,[kx_n(i_p),ky_n(i_p)],6) ;
+                dist_array = sqrt( (Kx_interp-kx_n(i_p)).^2 + (Ky_interp-ky_n(i_p)).^2 + (Kz_interp-kz_n(i_p)).^2 );
+
+                [~,indexes] = mink(dist_array,20) ;
+
+                % [indexes,~] = findNearestNeighbors(ptCloud,[kx_n(i_p),ky_n(i_p),0],6) ;
 
                 nn = abs( isnan(Ek_m_temp(indexes)) -1) ;
                 nn_pos = nn;
@@ -235,9 +285,11 @@ end
 
             end
 
-            Ek_m(:,:,:,i) = Ek_m_temp;
+            Ek_m(:,:,i) = Ek_m_temp;
         end
         
+        delete(gcp('nocreate'))
+
         Ek_i = Ek_m;
         kx_matrix_i=Kx_interp; ky_matrix_i=Ky_interp;
 

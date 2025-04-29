@@ -13,7 +13,7 @@
 %                                                                         %
 % ----------------------------------------------------------------------- %
 
-function bxsf_to_ELECTRA(fileName,material_name,alat,reduce_flag,interpolation_factor) %codegen
+function bxsf_to_ELECTRA_L(fileName,material_name,alat,reduce_flag,interpolation_factor) %codegen
 if strcmp(reduce_flag,'y')
     reduce_SOC = 'SOC_not_magn';
 else
@@ -84,13 +84,12 @@ if strcmp(reduce_SOC,'SOC_not_magn')
         Ek(:,:,:,i) = Ek_full(:,:,:,2*i-1);
     end    
 end
-
 if strcmp(bands_interpolation,'yes')
     [ Ek, kx_matrix, ky_matrix, kz_matrix ] = Interpolation_3D(Ek,kx_matrix,ky_matrix,kz_matrix,a,b,c,alat,interpolation_factor) ;
 end
 
-
-save_filename=['Ek_',material_name,'.mat'];
+save_filename_data=['Ek_',material_name,'.mat'];
+save_filename = fullfile('Data/',save_filename_data);
 save(save_filename, 'Ek', 'kx_matrix', 'ky_matrix', 'kz_matrix', 'a', 'b', 'c', 'alat', 'save_filename') 
 
 
@@ -205,7 +204,7 @@ end
         if isempty(gcp('nocreate')) == 0
             delete(gcp('nocreate'))
         end
-        
+
         nlc = feature('NumCores') ;
         if nlc > n_bands
             nlc = n_bands;
@@ -216,7 +215,7 @@ end
             nl = nlc-1;
         end
         ppp = parpool('local',nlc);
-
+        
         if exist('blat','var') == 0 
             blat = alat;
         end
@@ -265,11 +264,11 @@ end
 
             for i_p = 1:size(kx_n,2)
 
-                % [indexes,~] = findNearestNeighborKz_interpKz_interps(ptCloud,[kx_n(i_p),ky_n(i_p),kz_n(i_p)],12) ;
-
                 dist_array = sqrt( (Kx_interp-kx_n(i_p)).^2 + (Ky_interp-ky_n(i_p)).^2 + (Kz_interp-kz_n(i_p)).^2 );
 
                 [~,indexes] = mink(dist_array,20) ;
+                
+                % [indexes,~] = findNearestNeighbors(ptCloud,[kx_n(i_p),ky_n(i_p),kz_n(i_p)],12) ;
 
                 nn = abs( isnan(Ek_m_temp(indexes)) -1) ;
                 nn_pos = nn;
@@ -282,9 +281,9 @@ end
 
             Ek_m(:,:,:,i) = Ek_m_temp;
         end
-
+        
         delete(gcp('nocreate'))
-
+        
         Ek_i = Ek_m;
         kx_matrix_i=Kx_interp; ky_matrix_i=Ky_interp; kz_matrix_i=Kz_interp;
 
